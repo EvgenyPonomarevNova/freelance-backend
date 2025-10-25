@@ -1,80 +1,109 @@
+// server.js
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
+
+// Импортируем sequelize из config
+const sequelize = require('./config/database');
+const { User, Project, Message } = require('./models');
+
+const app = express();
+
+// CORS настройки
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  credentials: true
+}));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Импортируем роуты
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
+const userRoutes = require('./routes/users');
+const chatRoutes = require('./routes/chat');
 
-const app = express();
+// Синхронизация БД
+const syncDatabase = async () => {
+  try {
+    await sequelize.authenticate();
+    console.log('✅ PostgreSQL connected successfully');
+    
+    // Пропускаем синхронизацию для теста
+    console.log('⚠️  Skipping table creation - manual setup required');
+    
+  } catch (error) {
+    console.error('❌ Database connection failed:', error);
+    process.exit(1);
+  }
+};
 
-// Middleware
-app.use(cors({
-  origin: "http://localhost:5173",
-  credentials: true
-}));
-app.use(express.json());
-
-// Отладочный middleware
-app.use((req, res, next) => {
-  console.log('📨 Incoming request:', req.method, req.url);
-  next();
-});
-
-// Подключение к MongoDB
-console.log('🔄 Attempting to connect to MongoDB...');
-
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => {
-  console.log('✅ SUCCESS: Connected to MongoDB');
-  console.log('📊 Database:', mongoose.connection.db.databaseName);
-})
-.catch((err) => {
-  console.log('❌ FAILED to connect to MongoDB');
-  console.log('Error:', err.message);
-});
-
-// Роуты - ТЕПЕРЬ ПОСЛЕ инициализации app
+// Роуты
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
-
-const chatRoutes = require('./routes/chat');
+app.use('/api/users', userRoutes);
 app.use('/api/chat', chatRoutes);
 
-
-const userRoutes = require('./routes/users');
-app.use('/api/users', userRoutes);
-
-
 // Health check
-app.get('/api/health', (req, res) => {
-  const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
-  
-  res.json({
-    status: 'OK',
-    database: dbStatus,
-    timestamp: new Date().toISOString()
+app.get('/api/health', async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    res.json({
+      status: 'OK',
+      message: 'NexusHub Backend is running!',
+      timestamp: new Date().toISOString(),
+      database: 'Connected',
+      environment: process.env.NODE_ENV
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'Error',
+      message: 'Database connection failed',
+      error: error.message
+    });
+  }
+});
+
+// 404 и error handlers
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method
   });
 });
 
-// Тестовый endpoint
-app.post('/api/simple-register', (req, res) => {
-  console.log('✅ Simple register endpoint called');
-  res.json({
-    message: 'Simple register works!',
-    data: req.body
+app.use((err, req, res, next) => {
+  console.error('🚨 Error:', err.stack);
+  res.status(500).json({
+    status: 'error',
+    message: process.env.NODE_ENV === 'production' ? 'Something went wrong!' : err.message
   });
 });
 
 const PORT = process.env.PORT || 3001;
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server started on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`🔐 Auth routes: http://localhost:${PORT}/api/auth`);
-  console.log(`💼 Project routes: http://localhost:${PORT}/api/projects`);
+// Запуск сервера
+const startServer = async () => {
+  try {
+    await syncDatabase();
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('🛑 Shutting down gracefully...');
+  await sequelize.close();
+  process.exit(0);
 });

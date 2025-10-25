@@ -1,47 +1,44 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const messageSchema = new mongoose.Schema({
-  project: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Project',
-    required: true
+const Message = sequelize.define(
+  "Message",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    text: {
+      type: DataTypes.STRING(2000),
+      allowNull: false,
+      validate: {
+        notEmpty: true,
+      },
+    },
+    type: {
+      type: DataTypes.STRING,
+      defaultValue: "text",
+      validate: {
+        isIn: [["text", "file"]],
+      },
+    },
+    file: {
+      type: DataTypes.JSONB,
+      defaultValue: null,
+    },
+    isRead: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
   },
-  sender: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  receiver: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  text: {
-    type: String,
-    required: true,
-    trim: true,
-    maxlength: 2000
-  },
-  type: {
-    type: String,
-    enum: ['text', 'file'],
-    default: 'text'
-  },
-  file: {
-    name: String,
-    size: Number,
-    url: String
-  },
-  isRead: {
-    type: Boolean,
-    default: false
+  {
+    tableName: "messages",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    underscored: true,
   }
-}, {
-  timestamps: true
-});
+);
 
-// Индексы для быстрого поиска
-messageSchema.index({ project: 1, createdAt: 1 });
-messageSchema.index({ sender: 1, receiver: 1 });
-
-module.exports = mongoose.model('Message', messageSchema);
+module.exports = Message;

@@ -1,4 +1,5 @@
-const Project = require('../models/Project');
+const { Project, User, sequelize } = require('../models');
+const { Op } = require('sequelize');
 
 // Создание проекта
 exports.createProject = async (req, res) => {
@@ -12,11 +13,17 @@ exports.createProject = async (req, res) => {
       budget,
       deadline,
       skills: skills || [],
-      client: req.user.id
+      client_id: req.user.id
     });
 
-    // Популируем данные клиента
-    await project.populate('client', 'profile.name profile.avatar');
+    // Загружаем данные клиента
+    await project.reload({
+      include: [{
+        model: User,
+        as: 'client',
+        attributes: ['id', 'profile']
+      }]
+    });
 
     res.status(201).json({
       status: 'success',
@@ -35,36 +42,39 @@ exports.getProjects = async (req, res) => {
   try {
     const { category, search, page = 1, limit = 10 } = req.query;
     
-    // Фильтры
-    const filter = { status: 'open' };
+    const where = { status: 'open' };
+    
     if (category && category !== 'all') {
-      filter.category = category;
+      where.category = category;
     }
     
-    // Поиск
     if (search) {
-      filter.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { skills: { $in: [new RegExp(search, 'i')] } }
+      where[Op.or] = [
+        { title: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } },
+        { skills: { [Op.overlap]: [search] } }
       ];
     }
 
-    const projects = await Project.find(filter)
-      .populate('client', 'profile.name profile.avatar profile.rating')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Project.countDocuments(filter);
+    const projects = await Project.findAndCountAll({
+      where,
+      include: [{
+        model: User,
+        as: 'client',
+        attributes: ['id', 'profile']
+      }],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit,
+      order: [['created_at', 'DESC']]
+    });
 
     res.json({
       status: 'success',
-      results: projects.length,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page,
-      projects
+      results: projects.rows.length,
+      total: projects.count,
+      pages: Math.ceil(projects.count / limit),
+      currentPage: parseInt(page),
+      projects: projects.rows
     });
   } catch (error) {
     res.status(500).json({
@@ -77,9 +87,13 @@ exports.getProjects = async (req, res) => {
 // Получение проекта по ID
 exports.getProject = async (req, res) => {
   try {
-    const project = await Project.findById(req.params.id)
-      .populate('client', 'profile.name profile.avatar profile.rating profile.completedProjects')
-      .populate('responses.freelancer', 'profile.name profile.avatar profile.rating');
+    const project = await Project.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'client',
+        attributes: ['id', 'profile']
+      }]
+    });
 
     if (!project) {
       return res.status(404).json({
@@ -106,21 +120,25 @@ exports.getProject = async (req, res) => {
 
 // Отклик на проект
 exports.respondToProject = async (req, res) => {
+  const t = await sequelize.transaction();
+  
   try {
     const { proposal, price, timeline } = req.body;
     const projectId = req.params.id;
 
     // Проверяем что пользователь фрилансер
     if (req.user.role !== 'freelancer') {
+      await t.rollback();
       return res.status(403).json({
         status: 'error',
         message: 'Только фрилансеры могут откликаться на проекты'
       });
     }
 
-    const project = await Project.findById(projectId);
+    const project = await Project.findByPk(projectId, { transaction: t });
 
     if (!project) {
+      await t.rollback();
       return res.status(404).json({
         status: 'error',
         message: 'Проект не найден'
@@ -129,10 +147,11 @@ exports.respondToProject = async (req, res) => {
 
     // Проверяем что пользователь еще не откликался
     const existingResponse = project.responses.find(
-      response => response.freelancer.toString() === req.user.id
+      response => response.freelancer_id === req.user.id
     );
 
     if (existingResponse) {
+      await t.rollback();
       return res.status(400).json({
         status: 'error',
         message: 'Вы уже отправили отклик на этот проект'
@@ -140,25 +159,37 @@ exports.respondToProject = async (req, res) => {
     }
 
     // Добавляем отклик
-    project.responses.push({
-      freelancer: req.user.id,
+    const newResponse = {
+      id: Date.now(),
+      freelancer_id: req.user.id,
       proposal,
       price,
       timeline,
-      status: 'pending'
+      status: 'pending',
+      created_at: new Date()
+    };
+
+    project.responses = [...project.responses, newResponse];
+    await project.save({ transaction: t });
+    await t.commit();
+
+    // Загружаем данные фрилансера для ответа
+    const freelancer = await User.findByPk(req.user.id, {
+      attributes: ['id', 'profile']
     });
 
-    await project.save();
-
-    // Популируем данные для ответа
-    await project.populate('responses.freelancer', 'profile.name profile.avatar profile.rating');
+    const responseWithFreelancer = {
+      ...newResponse,
+      freelancer: freelancer
+    };
 
     res.status(201).json({
       status: 'success',
       message: 'Отклик успешно отправлен',
-      response: project.responses[project.responses.length - 1]
+      response: responseWithFreelancer
     });
   } catch (error) {
+    await t.rollback();
     res.status(500).json({
       status: 'error',
       message: error.message
@@ -169,17 +200,26 @@ exports.respondToProject = async (req, res) => {
 // Получение откликов пользователя
 exports.getMyResponses = async (req, res) => {
   try {
-    const projects = await Project.find({
-      'responses.freelancer': req.user.id
-    }).populate('client', 'profile.name profile.avatar');
+    const projects = await Project.findAll({
+      where: {
+        responses: {
+          [Op.contains]: [{ freelancer_id: req.user.id }]
+        }
+      },
+      include: [{
+        model: User,
+        as: 'client',
+        attributes: ['id', 'profile']
+      }]
+    });
 
     const responses = projects.flatMap(project => 
       project.responses
-        .filter(response => response.freelancer.toString() === req.user.id)
+        .filter(response => response.freelancer_id === req.user.id)
         .map(response => ({
-          ...response.toObject(),
+          ...response,
           project: {
-            _id: project._id,
+            id: project.id,
             title: project.title,
             budget: project.budget,
             client: project.client
@@ -203,9 +243,15 @@ exports.getMyResponses = async (req, res) => {
 // Получение проектов пользователя
 exports.getMyProjects = async (req, res) => {
   try {
-    const projects = await Project.find({ client: req.user.id })
-      .populate('responses.freelancer', 'profile.name profile.avatar profile.rating')
-      .sort({ createdAt: -1 });
+    const projects = await Project.findAll({
+      where: { client_id: req.user.id },
+      include: [{
+        model: User,
+        as: 'client',
+        attributes: ['id', 'profile']
+      }],
+      order: [['created_at', 'DESC']]
+    });
 
     res.json({
       status: 'success',
@@ -220,15 +266,18 @@ exports.getMyProjects = async (req, res) => {
   }
 };
 
-// Обновление статуса отклика (принятие/отклонение)
+// Обновление статуса отклика
 exports.updateResponseStatus = async (req, res) => {
+  const t = await sequelize.transaction();
+  
   try {
     const { projectId, responseId } = req.params;
     const { status } = req.body;
 
-    const project = await Project.findById(projectId);
+    const project = await Project.findByPk(projectId, { transaction: t });
 
     if (!project) {
+      await t.rollback();
       return res.status(404).json({
         status: 'error',
         message: 'Проект не найден'
@@ -236,36 +285,44 @@ exports.updateResponseStatus = async (req, res) => {
     }
 
     // Проверяем что пользователь - владелец проекта
-    if (project.client.toString() !== req.user.id) {
+    if (project.client_id !== req.user.id) {
+      await t.rollback();
       return res.status(403).json({
         status: 'error',
         message: 'Только владелец проекта может менять статус откликов'
       });
     }
 
-    const response = project.responses.id(responseId);
-    if (!response) {
+    // Находим и обновляем отклик
+    const responseIndex = project.responses.findIndex(
+      response => response.id === parseInt(responseId)
+    );
+
+    if (responseIndex === -1) {
+      await t.rollback();
       return res.status(404).json({
         status: 'error',
         message: 'Отклик не найден'
       });
     }
 
-    response.status = status;
-    await project.save();
-
+    project.responses[responseIndex].status = status;
+    
     // Если отклик принят, меняем статус проекта
     if (status === 'accepted') {
       project.status = 'in_progress';
-      await project.save();
     }
+
+    await project.save({ transaction: t });
+    await t.commit();
 
     res.json({
       status: 'success',
       message: `Отклик ${status === 'accepted' ? 'принят' : 'отклонен'}`,
-      response
+      response: project.responses[responseIndex]
     });
   } catch (error) {
+    await t.rollback();
     res.status(500).json({
       status: 'error',
       message: error.message

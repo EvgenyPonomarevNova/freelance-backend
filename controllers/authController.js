@@ -1,5 +1,5 @@
-const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const { User } = require('../models');
 
 const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -11,7 +11,8 @@ exports.register = async (req, res) => {
   try {
     const { email, password, fullName, role } = req.body;
 
-    const existingUser = await User.findOne({ email });
+    // Проверяем существующего пользователя
+    const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({
         status: 'error',
@@ -19,22 +20,30 @@ exports.register = async (req, res) => {
       });
     }
 
+    // Создаем пользователя
     const newUser = await User.create({
       email,
       password,
       role,
       profile: {
-        name: fullName
+        name: fullName,
+        bio: '',
+        avatar: '',
+        category: 'other',
+        rating: 5.0,
+        completedProjects: 0,
+        responseRate: '100%',
+        skills: [],
+        online: false
       }
     });
 
-    const token = signToken(newUser._id);
-    newUser.password = undefined;
+    const token = signToken(newUser.id);
 
     res.status(201).json({
       status: 'success',
       token,
-      user: newUser
+      user: newUser.toSafeObject()
     });
   } catch (error) {
     res.status(400).json({
@@ -55,22 +64,21 @@ exports.login = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ where: { email } });
     
-    if (!user || !(await user.correctPassword(password, user.password))) {
+    if (!user || !(await user.correctPassword(password))) {
       return res.status(401).json({
         status: 'error', 
         message: 'Неверный email или пароль'
       });
     }
 
-    const token = signToken(user._id);
-    user.password = undefined;
+    const token = signToken(user.id);
 
     res.json({
       status: 'success',
       token,
-      user
+      user: user.toSafeObject()
     });
   } catch (error) {
     res.status(400).json({
@@ -80,13 +88,12 @@ exports.login = async (req, res) => {
   }
 };
 
-// ДОБАВЛЯЕМ ЭТУ ФУНКЦИЮ
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findByPk(req.user.id);
     res.json({
       status: 'success',
-      user
+      user: user.toSafeObject()
     });
   } catch (error) {
     res.status(500).json({

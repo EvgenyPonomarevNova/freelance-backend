@@ -1,79 +1,82 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+// models/User.js
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database"); // ✅ импортируем sequelize
 
-const userSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
+const User = sequelize.define(
+  "User",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    email: {
+      type: DataTypes.STRING,
+      unique: true,
+      allowNull: false,
+      validate: {
+        isEmail: true,
+      },
+    },
+    password: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: {
+        len: [6, 100],
+      },
+    },
+    role: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      validate: {
+        isIn: [["freelancer", "client"]],
+      },
+    },
+    profile: {
+      type: DataTypes.JSONB,
+      defaultValue: {
+        name: "",
+        bio: "",
+        avatar: "",
+        category: "other",
+        rating: 5.0,
+        completedProjects: 0,
+        responseRate: "100%",
+        skills: [],
+        online: false,
+      },
+    },
   },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6
-  },
-  role: {
-    type: String,
-    enum: ['freelancer', 'client'],
-    required: true
-  },
-  profile: {
-    name: {
-      type: String,
-      required: true
+  {
+    tableName: "users",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    underscored: true ,
+    hooks: {
+      beforeCreate: async (user) => {
+        user.password = await bcrypt.hash(user.password, 12);
+      },
+      beforeUpdate: async (user) => {
+        if (user.changed("password")) {
+          user.password = await bcrypt.hash(user.password, 12);
+        }
+      },
     },
-    bio: {
-      type: String,
-      default: ''
-    },
-    avatar: {
-      type: String,
-      default: ''
-    },
-    category: {
-      type: String,
-      enum: ['development', 'design', 'marketing', 'writing', 'seo', 'other'],
-      default: 'other'
-    },
-    rating: {
-      type: Number,
-      default: 5.0,
-      min: 0,
-      max: 5
-    },
-    completedProjects: {
-      type: Number,
-      default: 0
-    },
-    responseRate: {
-      type: String,
-      default: '100%'
-    },
-    skills: [{
-      type: String
-    }],
-    online: {
-      type: Boolean,
-      default: false
-    }
   }
-}, {
-  timestamps: true
-});
+);
 
-// Хеширование пароля перед сохранением
-userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
-  
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
+// Добавьте bcrypt в начале файла
+const bcrypt = require("bcryptjs");
 
-// Метод для проверки пароля
-userSchema.methods.correctPassword = async function(candidatePassword, userPassword) {
-  return await bcrypt.compare(candidatePassword, userPassword);
+User.prototype.correctPassword = async function (candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
-module.exports = mongoose.model('User', userSchema);
+User.prototype.toSafeObject = function () {
+  const user = this.toJSON();
+  delete user.password;
+  return user;
+};
+
+module.exports = User;
