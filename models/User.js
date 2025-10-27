@@ -1,6 +1,7 @@
 // models/User.js
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/database"); // ✅ импортируем sequelize
+const sequelize = require("../config/database");
+const bcrypt = require("bcryptjs");
 
 const User = sequelize.define(
   "User",
@@ -52,7 +53,7 @@ const User = sequelize.define(
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
-    underscored: true ,
+    underscored: true,
     hooks: {
       beforeCreate: async (user) => {
         user.password = await bcrypt.hash(user.password, 12);
@@ -66,9 +67,7 @@ const User = sequelize.define(
   }
 );
 
-// Добавьте bcrypt в начале файла
-const bcrypt = require("bcryptjs");
-
+// Методы
 User.prototype.correctPassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };

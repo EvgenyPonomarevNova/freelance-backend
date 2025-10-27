@@ -1,3 +1,4 @@
+// models/Project.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/database");
 
@@ -27,9 +28,7 @@ const Project = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       validate: {
-        isIn: [
-          ["development", "design", "marketing", "writing", "seo", "other"],
-        ],
+        isIn: [["development", "design", "marketing", "writing", "seo", "other"]],
       },
     },
     budget: {
@@ -62,13 +61,21 @@ const Project = sequelize.define(
       type: DataTypes.JSONB,
       defaultValue: [],
     },
+    client_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id'
+      }
+    }
   },
   {
     tableName: "projects",
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
-    underscored: true ,
+    underscored: true,
   }
 );
 

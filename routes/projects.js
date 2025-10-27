@@ -1,26 +1,24 @@
 const express = require('express');
-const { 
-  createProject, 
-  getProjects, 
-  getProject,
-  respondToProject,
-  getMyResponses,
-  getMyProjects,
-  updateResponseStatus
-} = require('../controllers/projectController');
-const { protect } = require('../middleware/auth');
-
 const router = express.Router();
+const projectController = require('../controllers/projectController');
+const { body } = require('express-validator');
 
-// Публичные роуты
-router.get('/', getProjects);
-router.get('/:id', getProject);
+// Валидация откликов
+const validateResponse = [
+  body('proposal').optional().isLength({ max: 1000 }),
+  body('price').optional().isNumeric(),
+  body('timeline').optional().isLength({ max: 100 })
+];
 
-// Защищенные роуты
-router.post('/', protect, createProject);
-router.post('/:id/respond', protect, respondToProject);
-router.get('/my/responses', protect, getMyResponses);
-router.get('/client/my-projects', protect, getMyProjects);
-router.patch('/:projectId/responses/:responseId', protect, updateResponseStatus);
+const validateStatus = [
+  body('status').notEmpty().isIn(['pending', 'accepted', 'rejected'])
+];
+
+// Маршруты
+router.post('/:id/responses', validateResponse, projectController.respondToProject);
+router.put('/:id/responses/:responseId/status', validateStatus, projectController.updateResponseStatus);
+router.get('/:id/responses', projectController.getProjectResponses);
+router.get('/responses', projectController.getMyResponses);
+router.get('/user/projects', projectController.getUserProjects);
 
 module.exports = router;

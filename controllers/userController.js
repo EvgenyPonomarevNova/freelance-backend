@@ -1,10 +1,10 @@
-const { User, sequelize } = require('../models');
+const { User: UserModel, sequelize } = require('../models');
 const { Op } = require('sequelize');
 
 // Получение профиля пользователя
 exports.getUserProfile = async (req, res) => {
   try {
-    const user = await User.findByPk(req.params.id, {
+    const user = await UserModel.findByPk(req.params.id, {
       attributes: { exclude: ['password', 'email'] }
     });
 
@@ -32,7 +32,7 @@ exports.updateProfile = async (req, res) => {
   try {
     const { name, bio, skills, category } = req.body;
 
-    const user = await User.findByPk(req.user.id);
+    const user = await UserModel.findByPk(req.user.id);
     
     if (!user) {
       return res.status(404).json({
@@ -83,7 +83,7 @@ exports.getFreelancers = async (req, res) => {
       ];
     }
 
-    const freelancers = await User.findAndCountAll({
+    const freelancers = await UserModel.findAndCountAll({
       where,
       attributes: { exclude: ['password', 'email'] },
       limit: parseInt(limit),
