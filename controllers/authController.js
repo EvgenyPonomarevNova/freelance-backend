@@ -9,7 +9,25 @@ const signToken = (id) => {
 
 exports.register = async (req, res) => {
   try {
+    console.log('Register request body:', req.body); // Для дебага
+    
+    // Проверяем что body существует
+    if (!req.body) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Request body is missing'
+      });
+    }
+
     const { email, password, fullName, role } = req.body;
+
+    // Проверяем обязательные поля
+    if (!email || !password || !fullName || !role) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Все поля обязательны для заполнения'
+      });
+    }
 
     // Проверяем существующего пользователя
     const existingUser = await User.findOne({ where: { email } });
@@ -46,13 +64,13 @@ exports.register = async (req, res) => {
       user: newUser.toSafeObject()
     });
   } catch (error) {
+    console.error('Register error:', error);
     res.status(400).json({
       status: 'error',
       message: error.message
     });
   }
 };
-
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;

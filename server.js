@@ -1,51 +1,38 @@
-// server.js
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-// Импортируем sequelize из config
 const sequelize = require('./config/database');
 const { User, Project, Message } = require('./models');
 
 const app = express();
 
-// CORS настройки
+// 🔥 ВАЖНО: Эти middleware должны быть ПЕРВЫМИ!
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
 app.use(cors({
-  origin: 'http://localhost:5173', // Vite dev server
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Логирование запросов (опционально)
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  next();
+});
 
-// Импортируем роуты
+// Импорт роутов
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const userRoutes = require('./routes/users');
-const chatRoutes = require('./routes/chat');
 
-// Синхронизация БД
-const syncDatabase = async () => {
-  try {
-    await sequelize.authenticate();
-    console.log('✅ PostgreSQL connected successfully');
-    
-    // Пропускаем синхронизацию для теста
-    console.log('⚠️  Skipping table creation - manual setup required');
-    
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    process.exit(1);
-  }
-};
-
-// Роуты
+// Роуты API
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/chat', chatRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -67,7 +54,17 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// 404 и error handlers
+// Тестовый роут для проверки body
+app.post('/api/test-body', (req, res) => {
+  console.log('Test body received:', req.body);
+  res.json({
+    received: true,
+    body: req.body,
+    message: 'Body parsing is working!'
+  });
+});
+
+// 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -76,6 +73,7 @@ app.use('*', (req, res) => {
   });
 });
 
+// Error handler
 app.use((err, req, res, next) => {
   console.error('🚨 Error:', err.stack);
   res.status(500).json({
@@ -86,10 +84,10 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3001;
 
-// Запуск сервера
 const startServer = async () => {
   try {
-    await syncDatabase();
+    await sequelize.authenticate();
+    console.log('✅ PostgreSQL connected successfully');
     
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
@@ -102,7 +100,6 @@ const startServer = async () => {
 };
 
 startServer();
-
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('🛑 Shutting down gracefully...');

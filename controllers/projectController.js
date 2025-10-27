@@ -1,234 +1,307 @@
 const { Project, User, sequelize } = require('../models');
-const { v4: uuidv4 } = require('uuid');
-const { validationResult } = require('express-validator');
+const { Op } = require('sequelize');
 
-
-
-
-// Валидация для создания отклика
-exports.validateResponse = [
-  // Проверка обязательных полей
-  (req, res, next) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        errors: errors.array() 
-      });
-    }
-    next();
-  }
-];
-
-// Валидация для обновления статуса
-exports.validateUpdateStatus = [
-  // Проверка наличия статуса
-  (req, res, next) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        errors: errors.array() 
-      });
-    }
-    next();
-  }
-];
-
-// Валидация для обновления профиля
-exports.validateProfileUpdate = [
-  // Проверка длины пароля
-  (req, res, next) => {
-    if (req.body.password && req.body.password.length < 6) {
-      return res.status(400).json({ 
-        errors: [{ msg: 'Пароль должен быть не менее 6 символов' }] 
-      });
-    }
-    next();
-  }
-];
-// Создание отклика на проект
-exports.respondToProject = async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-
-  const { id } = req.params;
-  const { proposal, price, timeline } = req.body;
-
+// Получение всех проектов
+exports.getProjects = async (req, res) => {
   try {
-    const project = await Project.findByPk(id);
-    if (!project) {
-      return res.status(404).json({ message: 'Проект не найден' });
-    }
-
-    const freelancerId = req.user.id;
+    const { category, search, page = 1, limit = 10 } = req.query;
     
-    // Проверка, что пользователь не отправил отклик на свой же проект
-    if (project.user_id === freelancerId) {
-      return res.status(400).json({ message: 'Нельзя отправить отклик на свой же проект' });
-    }
-
-    // Проверка, что пользователь не отправил уже отклик на этот проект
-    const existingResponse = project.responses?.find(
-      response => response.freelancer_id === freelancerId
-    );
+    const where = { status: 'open' };
     
-    if (existingResponse) {
-      return res.status(400).json({ message: 'Вы уже отправили отклик на этот проект' });
+    if (category && category !== 'all') {
+      where.category = category;
+    }
+    
+    if (search) {
+      where[Op.or] = [
+        { title: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } },
+        { skills: { [Op.overlap]: [search] } }
+      ];
     }
 
-    // Создание нового отклика
-    const newResponse = {
-      id: uuidv4(),
-      freelancer_id: freelancerId,
-      proposal: proposal || null,
-      price: price || null,
-      timeline: timeline || null,
-      status: 'pending',
-      created_at: new Date()
-    };
-
-    // Обновление массива откликов
-    const updatedResponses = project.responses ? [...project.responses, newResponse] : [newResponse];
-
-    await project.update({ responses: updatedResponses });
-
-    res.status(201).json({
-      message: 'Отклик успешно отправлен',
-      response: newResponse
-    });
-  } catch (error) {
-    console.error('Ошибка при отправке отклика:', error);
-    res.status(500).json({ message: 'Ошибка сервера' });
-  }
-};
-
-// Обновление статуса отклика
-exports.updateResponseStatus = async (req, res) => {
-  const { id, responseId } = req.params;
-  const { status } = req.body;
-
-  try {
-    const project = await Project.findByPk(id);
-    if (!project) {
-      return res.status(404).json({ message: 'Проект не найден' });
-    }
-
-    const responseIndex = project.responses?.findIndex(
-      response => response.id === responseId
-    );
-
-    if (responseIndex === -1) {
-      return res.status(404).json({ message: 'Отклик не найден' });
-    }
-
-    // Проверка, что только владелец проекта может изменять статус
-    if (project.user_id !== req.user.id) {
-      return res.status(403).json({ message: 'Доступ запрещен' });
-    }
-
-    // Обновление статуса отклика
-    project.responses[responseIndex].status = status;
-    project.responses[responseIndex].updated_at = new Date();
-
-    await project.update({ responses: project.responses });
-
-    res.json({
-      message: 'Статус отклика обновлен',
-      response: project.responses[responseIndex]
-    });
-  } catch (error) {
-    console.error('Ошибка при обновлении статуса отклика:', error);
-    res.status(500).json({ message: 'Ошибка сервера' });
-  }
-};
-
-// Получение откликов на проект
-exports.getProjectResponses = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const project = await Project.findByPk(id, {
+    const projects = await Project.findAndCountAll({
+      where,
       include: [{
         model: User,
-        as: 'freelancer',
+        as: 'client',
+        attributes: ['id', 'profile']
+      }],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit,
+      order: [['created_at', 'DESC']]
+    });
+
+    res.json({
+      status: 'success',
+      results: projects.rows.length,
+      total: projects.count,
+      pages: Math.ceil(projects.count / limit),
+      currentPage: parseInt(page),
+      projects: projects.rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+};
+
+// Получение проекта по ID
+exports.getProject = async (req, res) => {
+  try {
+    const project = await Project.findByPk(req.params.id, {
+      include: [{
+        model: User,
+        as: 'client',
         attributes: ['id', 'profile']
       }]
     });
 
     if (!project) {
-      return res.status(404).json({ message: 'Проект не найден' });
+      return res.status(404).json({
+        status: 'error',
+        message: 'Проект не найден'
+      });
     }
 
-    // Проверка, что только владелец проекта может видеть отклики
-    if (project.user_id !== req.user.id) {
-      return res.status(403).json({ message: 'Доступ запрещен' });
-    }
+    // Увеличиваем просмотры
+    project.views += 1;
+    await project.save();
 
-    const responses = project.responses || [];
-    
     res.json({
-      responses: responses.map(response => ({
-        ...response,
-        freelancer: project.freelancer
-      }))
+      status: 'success',
+      project
     });
   } catch (error) {
-    console.error('Ошибка при получении откликов:', error);
-    res.status(500).json({ message: 'Ошибка сервера' });
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+};
+
+// Создание проекта
+exports.createProject = async (req, res) => {
+  try {
+    const { title, description, category, budget, deadline, skills } = req.body;
+
+    const project = await Project.create({
+      title,
+      description, 
+      category,
+      budget,
+      deadline,
+      skills: skills || [],
+      client_id: req.user.id
+    });
+
+    // Загружаем данные клиента
+    await project.reload({
+      include: [{
+        model: User,
+        as: 'client',
+        attributes: ['id', 'profile']
+      }]
+    });
+
+    res.status(201).json({
+      status: 'success',
+      project
+    });
+  } catch (error) {
+    res.status(400).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+};
+
+// Отклик на проект
+exports.respondToProject = async (req, res) => {
+  try {
+    const { proposal, price, timeline } = req.body;
+    const projectId = parseInt(req.params.id);
+
+    if (req.user.role !== 'freelancer') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Только фрилансеры могут откликаться на проекты'
+      });
+    }
+
+    const project = await Project.findByPk(projectId);
+
+    if (!project) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Проект не найден'
+      });
+    }
+
+    // Проверяем отклик
+    const existingResponse = project.responses?.find(
+      response => response.freelancer_id === req.user.id
+    );
+
+    if (existingResponse) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Вы уже отправили отклик на этот проект'
+      });
+    }
+
+    // Создаем новый отклик
+    const newResponse = {
+      id: Date.now(),
+      freelancer_id: req.user.id,
+      proposal: proposal || "Готов взяться за проект!",
+      price: price || project.budget * 0.8,
+      timeline: timeline || "2 недели",
+      status: 'pending',
+      created_at: new Date().toISOString()
+    };
+
+    // Обновляем responses
+    const updatedResponses = [...(project.responses || []), newResponse];
+    await project.update({ responses: updatedResponses });
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Отклик успешно отправлен',
+      response: newResponse
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
   }
 };
 
 // Получение откликов пользователя
 exports.getMyResponses = async (req, res) => {
   try {
-    const responses = await Project.findAll({
+    const projects = await Project.findAll({
       where: {
         responses: {
-          [sequelize.Op.contains]: [{ freelancer_id: req.user.id }]
+          [Op.contains]: [{ freelancer_id: req.user.id }]
         }
       },
       include: [{
         model: User,
-        as: 'user',
+        as: 'client',
         attributes: ['id', 'profile']
       }]
     });
 
-    // Фильтрация откликов пользователя
-    const userResponses = responses.flatMap(project => 
-      project.responses?.filter(response => response.freelancer_id === req.user.id) || []
+    const responses = projects.flatMap(project => 
+      project.responses
+        .filter(response => response.freelancer_id === req.user.id)
+        .map(response => ({
+          ...response,
+          project: {
+            id: project.id,
+            title: project.title,
+            budget: project.budget,
+            client: project.client
+          }
+        }))
     );
 
     res.json({
-      responses: userResponses.map(response => ({
-        ...response,
-        project: {
-          id: project.id,
-          title: project.title,
-          description: project.description
-        }
-      }))
+      status: 'success',
+      results: responses.length,
+      responses
     });
   } catch (error) {
-    console.error('Ошибка при получении откликов пользователя:', error);
-    res.status(500).json({ message: 'Ошибка сервера' });
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
   }
 };
 
 // Получение проектов пользователя
-exports.getUserProjects = async (req, res) => {
+exports.getMyProjects = async (req, res) => {
   try {
     const projects = await Project.findAll({
-      where: {
-        user_id: req.user.id
-      },
+      where: { client_id: req.user.id },
+      include: [{
+        model: User,
+        as: 'client',
+        attributes: ['id', 'profile']
+      }],
       order: [['created_at', 'DESC']]
     });
 
-    res.json({ projects });
+    res.json({
+      status: 'success',
+      results: projects.length,
+      projects
+    });
   } catch (error) {
-    console.error('Ошибка при получении проектов пользователя:', error);
-    res.status(500).json({ message: 'Ошибка сервера' });
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
+};
+
+// Обновление статуса отклика
+exports.updateResponseStatus = async (req, res) => {
+  try {
+    const { projectId, responseId } = req.params;
+    const { status } = req.body;
+
+    const project = await Project.findByPk(projectId);
+
+    if (!project) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Проект не найден'
+      });
+    }
+
+    // Проверяем что пользователь - владелец проекта
+    if (project.client_id !== req.user.id) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Только владелец проекта может менять статус откликов'
+      });
+    }
+
+    // Находим и обновляем отклик
+    const responseIndex = project.responses.findIndex(
+      response => response.id === parseInt(responseId)
+    );
+
+    if (responseIndex === -1) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Отклик не найден'
+      });
+    }
+
+    project.responses[responseIndex].status = status;
+    
+    // Если отклик принят, меняем статус проекта
+    if (status === 'accepted') {
+      project.status = 'in_progress';
+    }
+
+    await project.save();
+
+    res.json({
+      status: 'success',
+      message: `Отклик ${status === 'accepted' ? 'принят' : 'отклонен'}`,
+      response: project.responses[responseIndex]
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
   }
 };
