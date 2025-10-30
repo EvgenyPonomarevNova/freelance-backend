@@ -1,7 +1,7 @@
 // models/User.js
 const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
 const bcrypt = require('bcryptjs');
+const sequelize = require('../config/database');
 
 const User = sequelize.define('User', {
   id: {
@@ -13,14 +13,12 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: false,
     unique: true,
-    validate: {
-      isEmail: true
-    }
+    validate: { isEmail: true }
   },
   fullName: {
     type: DataTypes.STRING,
     allowNull: false,
-    defaultValue: 'Новый пользователь' // 🔥 ДОБАВЛЯЕМ ЗНАЧЕНИЕ ПО УМОЛЧАНИЮ
+    defaultValue: 'Новый пользователь'
   },
   role: {
     type: DataTypes.ENUM('freelancer', 'client'),
@@ -28,7 +26,7 @@ const User = sequelize.define('User', {
   },
   passwordHash: {
     type: DataTypes.STRING,
-    allowNull: true // Для OAuth пользователей
+    allowNull: true
   },
   profile: {
     type: DataTypes.JSONB,
@@ -59,7 +57,7 @@ const User = sequelize.define('User', {
   timestamps: true,
   createdAt: 'created_at',
   updatedAt: 'updated_at',
-  underscored: true // 🔥 ВАЖНО: согласованность именования
+  underscored: true
 });
 
 // Хук для хеширования пароля
@@ -82,7 +80,7 @@ User.prototype.toJSON = function() {
   return values;
 };
 
-// 🔥 ДОБАВЛЯЕМ МЕТОД ДЛЯ БЕЗОПАСНОГО ОБЪЕКТА
+// Метод для безопасного объекта
 User.prototype.toSafeObject = function() {
   return {
     id: this.id,

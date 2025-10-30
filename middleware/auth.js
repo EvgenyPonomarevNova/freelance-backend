@@ -2,46 +2,78 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 
+class AuthError extends Error {
+  constructor(message, status = 401) {
+    super(message);
+    this.status = status;
+    this.name = 'AuthError';
+  }
+}
+
 exports.protect = async (req, res, next) => {
   try {
-    let token;
+    const token = extractToken(req);
     
-    console.log('Authorization header:', req.headers.authorization);
-    
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-
     if (!token) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Не авторизован'
-      });
+      throw new AuthError('Требуется авторизация');
     }
 
-    console.log('Token:', token);
-    
-    // 🔥 ИСПРАВЛЕНИЕ: используем правильное поле из токена
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('Decoded token:', decoded);
-    
-    // 🔥 ИСПРАВЛЕНИЕ: используем userId вместо id
-    const user = await User.findByPk(decoded.userId || decoded.id);
+    const user = await User.findByPk(decoded.userId);
     
     if (!user) {
-      return res.status(401).json({
-        status: 'error', 
-        message: 'Пользователь не найден'
-      });
+      throw new AuthError('Пользователь не найден');
+    }
+
+    if (!user.isActive) {
+      throw new AuthError('Аккаунт деактивирован', 403);
     }
 
     req.user = user;
     next();
+    
   } catch (error) {
-    console.error('JWT Error:', error.message);
-    return res.status(401).json({
-      status: 'error',
-      message: 'Невалидный токен'
+    const status = error.status || 401;
+    const message = error.name === 'JsonWebTokenError' ? 'Невалидный токен' : error.message;
+    
+    res.status(status).json({
+      success: false,
+      error: message
     });
   }
 };
+
+exports.optional = async (req, res, next) => {
+  try {
+    const token = extractToken(req);
+    
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findByPk(decoded.userId);
+      if (user && user.isActive) {
+        req.user = user;
+      }
+    }
+    
+    next();
+  } catch (error) {
+    next();
+  }
+};
+
+exports.restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Недостаточно прав'
+      });
+    }
+    next();
+  };
+};
+
+function extractToken(req) {
+  const authHeader = req.headers.authorization;
+  return authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+}
