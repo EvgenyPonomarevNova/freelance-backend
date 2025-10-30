@@ -1,3 +1,4 @@
+// models/Message.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/database");
 
@@ -8,6 +9,22 @@ const Message = sequelize.define(
       type: DataTypes.INTEGER,
       primaryKey: true,
       autoIncrement: true,
+    },
+    chatId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'chats',
+        key: 'id'
+      }
+    },
+    senderId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id'
+      }
     },
     text: {
       type: DataTypes.STRING(2000),

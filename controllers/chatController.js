@@ -1,85 +1,161 @@
-const { Message, Project, User } = require('../models');
-const { Op } = require('sequelize');
+// controllers/chats.js
+const { Chat, Message, User, Project } = require('../models');
 
-// Отправка сообщения
-exports.sendMessage = async (req, res) => {
+// Получить или создать чат
+exports.getOrCreateChat = async (req, res) => {
   try {
-    const { projectId, receiverId, text, type = 'text', file } = req.body;
+    const { projectId, freelancerId } = req.body;
+    const clientId = req.user.id;
 
-    // Проверяем что пользователь участник проекта
-    const project = await Project.findByPk(projectId);
-    if (!project) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Проект не найден'
+    let chat = await Chat.findOne({
+      where: {
+        projectId,
+        clientId,
+        freelancerId
+      },
+      include: [
+        {
+          model: User,
+          as: 'client',
+          attributes: ['id', 'email', 'profile']
+        },
+        {
+          model: User,
+          as: 'freelancer',
+          attributes: ['id', 'email', 'profile']
+        },
+        {
+          model: Project,
+          attributes: ['id', 'title', 'status']
+        }
+      ]
+    });
+
+    if (!chat) {
+      chat = await Chat.create({
+        projectId,
+        clientId,
+        freelancerId
+      });
+
+      // Загружаем связанные данные
+      chat = await Chat.findByPk(chat.id, {
+        include: [
+          {
+            model: User,
+            as: 'client',
+            attributes: ['id', 'email', 'profile']
+          },
+          {
+            model: User,
+            as: 'freelancer',
+            attributes: ['id', 'email', 'profile']
+          },
+          {
+            model: Project,
+            attributes: ['id', 'title', 'status']
+          }
+        ]
       });
     }
 
-    // Проверяем что пользователь клиент или откликнувшийся фрилансер
-    const isParticipant = 
-      project.client_id === req.user.id ||
-      project.responses.some(r => r.freelancer_id === req.user.id);
-
-    if (!isParticipant) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Вы не участник этого проекта'
-      });
-    }
-
-    const message = await Message.create({
-      project_id: projectId,
-      sender_id: req.user.id,
-      receiver_id: receiverId,
-      text,
-      type,
-      file: file || null
-    });
-
-    // Загружаем данные отправителя
-    await message.reload({
-      include: [{
-        model: User,
-        as: 'sender',
-        attributes: ['id', 'profile']
-      }]
-    });
-
-    res.status(201).json({
+    res.json({
       status: 'success',
-      message
+      chat
     });
   } catch (error) {
+    console.error('Chat creation error:', error);
     res.status(500).json({
       status: 'error',
-      message: error.message
+      message: 'Ошибка при создании чата'
     });
   }
 };
 
-// Получение истории сообщений
-exports.getMessages = async (req, res) => {
+// Получить список чатов пользователя
+exports.getUserChats = async (req, res) => {
   try {
-    const { projectId } = req.params;
-    const { page = 1, limit = 50 } = req.query;
+    const userId = req.user.id;
 
-    const messages = await Message.findAndCountAll({
-      where: { project_id: projectId },
+    const chats = await Chat.findAll({
+      where: {
+        [Op.or]: [
+          { clientId: userId },
+          { freelancerId: userId }
+        ],
+        isActive: true
+      },
+      include: [
+        {
+          model: User,
+          as: 'client',
+          attributes: ['id', 'email', 'profile']
+        },
+        {
+          model: User,
+          as: 'freelancer',
+          attributes: ['id', 'email', 'profile']
+        },
+        {
+          model: Project,
+          attributes: ['id', 'title', 'status', 'budget']
+        },
+        {
+          model: Message,
+          limit: 1,
+          order: [['created_at', 'DESC']]
+        }
+      ],
+      order: [['lastMessageAt', 'DESC']]
+    });
+
+    res.json({
+      status: 'success',
+      chats
+    });
+  } catch (error) {
+    console.error('Get chats error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Ошибка при загрузке чатов'
+    });
+  }
+};
+
+// Получить сообщения чата
+exports.getChatMessages = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user.id;
+
+    // Проверяем доступ к чату
+    const chat = await Chat.findOne({
+      where: {
+        id: chatId,
+        [Op.or]: [
+          { clientId: userId },
+          { freelancerId: userId }
+        ]
+      }
+    });
+
+    if (!chat) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Доступ к чату запрещен'
+      });
+    }
+
+    const messages = await Message.findAll({
+      where: { chatId },
       include: [
         {
           model: User,
           as: 'sender',
-          attributes: ['id', 'profile']
-        },
-        {
-          model: User,
-          as: 'receiver', 
-          attributes: ['id', 'profile']
+          attributes: ['id', 'email', 'profile']
         }
       ],
-      limit: parseInt(limit),
-      offset: (page - 1) * limit,
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'ASC']]
     });
 
     // Помечаем сообщения как прочитанные
@@ -87,8 +163,8 @@ exports.getMessages = async (req, res) => {
       { isRead: true },
       {
         where: {
-          project_id: projectId,
-          receiver_id: req.user.id,
+          chatId,
+          senderId: { [Op.ne]: userId },
           isRead: false
         }
       }
@@ -96,14 +172,85 @@ exports.getMessages = async (req, res) => {
 
     res.json({
       status: 'success',
-      results: messages.rows.length,
-      total: messages.count,
-      messages: messages.rows.reverse() // возвращаем в хронологическом порядке
+      messages
     });
   } catch (error) {
+    console.error('Get messages error:', error);
     res.status(500).json({
       status: 'error',
-      message: error.message
+      message: 'Ошибка при загрузке сообщений'
+    });
+  }
+};
+
+// Отправить сообщение
+exports.sendMessage = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { text, type = 'text', file = null } = req.body;
+    const senderId = req.user.id;
+
+    // Проверяем доступ к чату
+    const chat = await Chat.findOne({
+      where: {
+        id: chatId,
+        [Op.or]: [
+          { clientId: senderId },
+          { freelancerId: senderId }
+        ]
+      }
+    });
+
+    if (!chat) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Доступ к чату запрещен'
+      });
+    }
+
+    const message = await Message.create({
+      chatId,
+      senderId,
+      text,
+      type,
+      file
+    });
+
+    // Обновляем последнее сообщение в чате
+    await Chat.update(
+      {
+        lastMessage: text,
+        lastMessageAt: new Date()
+      },
+      { where: { id: chatId } }
+    );
+
+    // Увеличиваем счетчик непрочитанных
+    const unreadField = senderId === chat.clientId ? 
+      'unreadCountFreelancer' : 'unreadCountClient';
+    
+    await Chat.increment(unreadField, { where: { id: chatId } });
+
+    // Загружаем сообщение с данными отправителя
+    const messageWithSender = await Message.findByPk(message.id, {
+      include: [
+        {
+          model: User,
+          as: 'sender',
+          attributes: ['id', 'email', 'profile']
+        }
+      ]
+    });
+
+    res.json({
+      status: 'success',
+      message: messageWithSender
+    });
+  } catch (error) {
+    console.error('Send message error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Ошибка при отправке сообщения'
     });
   }
 };
