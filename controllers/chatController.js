@@ -1,5 +1,6 @@
-// controllers/chats.js
+// controllers/chatController.js
 const { Chat, Message, User, Project } = require('../models');
+const { Op } = require('sequelize');
 
 // Получить или создать чат
 exports.getOrCreateChat = async (req, res) => {
@@ -17,12 +18,12 @@ exports.getOrCreateChat = async (req, res) => {
         {
           model: User,
           as: 'client',
-          attributes: ['id', 'email', 'profile']
+          attributes: ['id', 'email', 'fullName', 'profile']
         },
         {
           model: User,
           as: 'freelancer',
-          attributes: ['id', 'email', 'profile']
+          attributes: ['id', 'email', 'fullName', 'profile']
         },
         {
           model: Project,
@@ -44,12 +45,12 @@ exports.getOrCreateChat = async (req, res) => {
           {
             model: User,
             as: 'client',
-            attributes: ['id', 'email', 'profile']
+            attributes: ['id', 'email', 'fullName', 'profile']
           },
           {
             model: User,
             as: 'freelancer',
-            attributes: ['id', 'email', 'profile']
+            attributes: ['id', 'email', 'fullName', 'profile']
           },
           {
             model: Project,
@@ -89,12 +90,12 @@ exports.getUserChats = async (req, res) => {
         {
           model: User,
           as: 'client',
-          attributes: ['id', 'email', 'profile']
+          attributes: ['id', 'email', 'fullName', 'profile']
         },
         {
           model: User,
           as: 'freelancer',
-          attributes: ['id', 'email', 'profile']
+          attributes: ['id', 'email', 'fullName', 'profile']
         },
         {
           model: Project,
@@ -152,7 +153,7 @@ exports.getChatMessages = async (req, res) => {
         {
           model: User,
           as: 'sender',
-          attributes: ['id', 'email', 'profile']
+          attributes: ['id', 'email', 'fullName', 'profile']
         }
       ],
       order: [['created_at', 'ASC']]
@@ -237,7 +238,7 @@ exports.sendMessage = async (req, res) => {
         {
           model: User,
           as: 'sender',
-          attributes: ['id', 'email', 'profile']
+          attributes: ['id', 'email', 'fullName', 'profile']
         }
       ]
     });

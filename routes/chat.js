@@ -1,4 +1,4 @@
-// routes/chats.js
+// routes/chat.js
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
@@ -7,7 +7,7 @@ const {
   getUserChats,
   getChatMessages,
   sendMessage
-} = require('../controllers/chats');
+} = require('../controllers/chatController');
 
 router.post('/create', protect, getOrCreateChat);
 router.get('/my', protect, getUserChats);

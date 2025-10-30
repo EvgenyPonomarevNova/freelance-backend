@@ -2,41 +2,38 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-const sequelize = require('./config/database');
-const { User, Project, Message } = require('./models');
+const { sequelize } = require('./models');
 
 const app = express();
 
-// 🔥 ВАЖНО: Эти middleware должны быть ПЕРВЫМИ!
+// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// 🔧 ОБНОВЛЕННЫЙ CORS - добавьте PATCH в методы
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // ДОБАВЬТЕ PATCH
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Явно обрабатываем preflight запросы
 app.options('*', cors());
 
-// Остальной код без изменений...
+// Логирование
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
   next();
 });
 
-// Импорт роутов
+// 🔥 ПРАВИЛЬНЫЙ ИМПОРТ РОУТОВ - используйте require с правильными путями
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const userRoutes = require('./routes/users');
 
-// Роуты API
+// 🔥 ПОДКЛЮЧЕНИЕ РОУТОВ
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/users', userRoutes);
+
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
@@ -56,7 +53,7 @@ app.get('/api/health', async (req, res) => {
     });
   }
 });
-
+/*
 // Тестовый роут для проверки body
 app.post('/api/test-body', (req, res) => {
   console.log('Test body received:', req.body);
@@ -66,7 +63,7 @@ app.post('/api/test-body', (req, res) => {
     message: 'Body parsing is working!'
   });
 });
-
+*/
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
@@ -95,6 +92,18 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+      console.log(`📊 Database: PostgreSQL`);
+      console.log('\n📡 Available routes:');
+      console.log('   GET  /api/health');
+      console.log('   POST /api/test-body');
+      console.log('   POST /api/auth/register');
+      console.log('   POST /api/auth/login');
+      console.log('   GET  /api/projects');
+      console.log('   GET  /api/users/freelancers');
+      console.log('🔧 Loaded routes:');
+console.log('   - /api/auth');
+console.log('   - /api/projects'); 
+console.log('   - /api/users');
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
