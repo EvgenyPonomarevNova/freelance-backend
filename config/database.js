@@ -1,6 +1,6 @@
 const { Sequelize } = require("sequelize");
 const sequelize = new Sequelize(
-  process.env.DB_NAME,
+  process.env.DB_NAME || 'freelancehub_base',  // ← убедитесь что здесь правильное имя
   process.env.DB_USER,
   process.env.DB_PASSWORD,
   {

@@ -4,7 +4,8 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 const { Op } = require('sequelize');
-const { protect, optional } = require('../middleware/auth');
+const { protect } = require('../middleware/auth');
+const { validate, schemas } = require('../middleware/validation');
 
 class AuthService {
   static generateToken(user) {
@@ -56,17 +57,10 @@ router.get('/', (req, res) => {
   });
 });
 
-// Регистрация
-router.post('/register', async (req, res) => {
+// Регистрация с валидацией
+router.post('/register', validate(schemas.register), async (req, res) => {
   try {
-    const { email, password, fullName, role = 'freelancer' } = req.body;
-
-    if (!email || !password || !fullName) {
-      return res.status(400).json({
-        success: false,
-        error: 'Все поля обязательны'
-      });
-    }
+    const { email, password, fullName, role } = req.body;
 
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
@@ -102,17 +96,10 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Логин
-router.post('/login', async (req, res) => {
+// Логин с валидацией
+router.post('/login', validate(schemas.login), async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email и пароль обязательны'
-      });
-    }
 
     const user = await User.findOne({ where: { email } });
     if (!user || !(await user.checkPassword(password))) {
@@ -147,17 +134,10 @@ router.get('/me', protect, async (req, res) => {
   });
 });
 
-// Яндекс OAuth
-router.post('/oauth/yandex/login', async (req, res) => {
+// Яндекс OAuth с валидацией
+router.post('/oauth/yandex/login', validate(schemas.yandexOAuth), async (req, res) => {
   try {
     const { code } = req.body;
-
-    if (!code) {
-      return res.status(400).json({
-        success: false,
-        error: 'Authorization code is required'
-      });
-    }
 
     const userData = code.startsWith('demo_') 
       ? await handleDemoOAuth(code)

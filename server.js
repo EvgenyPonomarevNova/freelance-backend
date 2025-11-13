@@ -3,142 +3,127 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 require('dotenv').config();
 
 const { sequelize } = require('./models');
 
-class App {
-  constructor() {
-    this.app = express();
-    this.setupMiddleware();
-    this.setupRoutes();
-    this.setupErrorHandling();
+const app = express();
+
+// 🔥 ИСПРАВЛЕННЫЙ CORS - ДОЛЖЕН БЫТЬ ПЕРЕД ВСЕМИ МИДЛВАРАМИ
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Content-Length'] // Добавьте Content-Length
+}));
+// Обрабатываем preflight запросы
+app.options('*', cors());
+
+// Остальные middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: {
+    success: false,
+    error: 'Слишком много запросов с этого IP'
   }
+});
+app.use('/api/', limiter);
 
-  setupMiddleware() {
-    // Security headers
-    this.app.use(helmet({
-      crossOriginResourcePolicy: { policy: "cross-origin" }
-    }));
+// Body parsing
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
-      message: {
-        success: false,
-        error: 'Слишком много запросов с этого IP, попробуйте позже'
-      }
+// Logging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/projects', require('./routes/projects'));
+app.use('/api/users', require('./routes/users'));
+
+// Health check
+app.get('/api/health', async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    res.json({
+      status: 'OK',
+      message: 'NexusHub Backend is running!',
+      timestamp: new Date().toISOString(),
+      database: 'Connected',
+      environment: process.env.NODE_ENV
     });
-    this.app.use('/api/', limiter);
-
-    // CORS
-    this.app.use(cors({
-      origin: ['http://localhost:5173', 'http://localhost:3000'],
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-    }));
-
-    this.app.options('*', cors());
-
-    // Body parsing
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-    // Logging
-    this.app.use(this.requestLogger);
+  } catch (error) {
+    res.status(500).json({
+      status: 'Error',
+      message: 'Database connection failed',
+      error: error.message
+    });
   }
+});
 
-  requestLogger(req, res, next) {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
-    next();
-  }
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method
+  });
+});
 
-  setupRoutes() {
-    // API Routes
-    this.app.use('/api/auth', require('./routes/auth'));
-    this.app.use('/api/projects', require('./routes/projects'));
-    this.app.use('/api/users', require('./routes/users'));
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('🚨 Error:', err.stack);
+  
+  // Добавляем CORS заголовки в ошибки
+  res.header('Access-Control-Allow-Origin', 'http://localhost:5173');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  res.status(500).json({
+    success: false,
+    error: process.env.NODE_ENV === 'production' ? 'Something went wrong!' : err.message
+  });
+});
 
-    // Health check (без rate limiting)
-    this.app.get('/api/health', this.healthCheck);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+app.use('/uploads', (req, res, next) => {
+  console.log('📁 Static file request:', req.url);
+  next();
+});
+
+const PORT = process.env.PORT || 3001;
+
+const startServer = async () => {
+  try {
+    await sequelize.authenticate();
+    console.log('✅ PostgreSQL connected successfully');
     
-    // 404 handler
-    this.app.use('*', this.notFoundHandler);
-  }
-
-  async healthCheck(req, res) {
-    try {
-      await sequelize.authenticate();
-      res.json({
-        status: 'OK',
-        message: 'NexusHub Backend is running!',
-        timestamp: new Date().toISOString(),
-        database: 'Connected',
-        environment: process.env.NODE_ENV
-      });
-    } catch (error) {
-      res.status(500).json({
-        status: 'Error',
-        message: 'Database connection failed',
-        error: error.message
-      });
-    }
-  }
-
-  notFoundHandler(req, res) {
-    res.status(404).json({
-      success: false,
-      error: 'Route not found',
-      path: req.originalUrl,
-      method: req.method
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+      console.log('🔒 CORS configured for:');
+      console.log('   - http://localhost:5173');
+      console.log('   - http://localhost:3000');
+      console.log('   - http://127.0.0.1:5173');
     });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
   }
+};
 
-  setupErrorHandling() {
-    this.app.use(this.errorHandler);
-  }
-
-  errorHandler(err, req, res, next) {
-    console.error('🚨 Error:', err.stack);
-
-    const isProduction = process.env.NODE_ENV === 'production';
-    
-    res.status(err.status || 500).json({
-      success: false,
-      error: isProduction ? 'Internal server error' : err.message,
-      ...(!isProduction && { stack: err.stack })
-    });
-  }
-
-  async start() {
-    try {
-      await sequelize.authenticate();
-      console.log('✅ PostgreSQL connected successfully');
-      
-      const PORT = process.env.PORT || 3001;
-      
-      this.app.listen(PORT, () => {
-        console.log(`🚀 Server running on port ${PORT}`);
-        console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-        console.log('🔒 Security features:');
-        console.log('   - Helmet.js enabled');
-        console.log('   - Rate limiting enabled (100 req/15min)');
-        console.log('   - CORS configured');
-        console.log('\n📡 Available endpoints:');
-        console.log('   GET    /api/health');
-        console.log('   POST   /api/auth/register');
-        console.log('   POST   /api/auth/login');
-        console.log('   GET    /api/projects');
-        console.log('   POST   /api/projects');
-      });
-    } catch (error) {
-      console.error('❌ Failed to start server:', error);
-      process.exit(1);
-    }
-  }
-}
+startServer();
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
@@ -146,12 +131,3 @@ process.on('SIGINT', async () => {
   await sequelize.close();
   process.exit(0);
 });
-
-process.on('unhandledRejection', (err) => {
-  console.error('🚨 Unhandled Promise Rejection:', err);
-  process.exit(1);
-});
-
-// Start the application
-const app = new App();
-app.start();
